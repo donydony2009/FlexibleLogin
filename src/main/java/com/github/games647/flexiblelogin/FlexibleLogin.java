@@ -45,12 +45,15 @@ import java.util.Map;
 import ninja.leaping.configurate.commented.CommentedConfigurationNode;
 import ninja.leaping.configurate.loader.ConfigurationLoader;
 
+import org.mindrot.jbcrypt.BCrypt;
 import org.slf4j.Logger;
 import org.spongepowered.api.Game;
+import org.spongepowered.api.Sponge;
 import org.spongepowered.api.command.CommandManager;
 import org.spongepowered.api.command.args.GenericArguments;
 import org.spongepowered.api.command.spec.CommandSpec;
 import org.spongepowered.api.config.DefaultConfig;
+import org.spongepowered.api.event.EventListener;
 import org.spongepowered.api.event.Listener;
 import org.spongepowered.api.event.game.state.GameInitializationEvent;
 import org.spongepowered.api.event.game.state.GamePreInitializationEvent;
@@ -60,160 +63,152 @@ import org.spongepowered.api.plugin.Plugin;
 import org.spongepowered.api.plugin.PluginContainer;
 import org.spongepowered.api.text.Text;
 
-@Plugin(id = "flexiblelogin", name = "FlexibleLogin", version = "0.8"
-        , url = "https://github.com/games647/FlexibleLogin"
-        , description = "A Sponge minecraft server plugin for second authentication.")
+@Plugin(id = "flexiblelogin", name = "FlexibleLogin", version = "0.8", description = "A Sponge minecraft server plugin for second authentication.")
 public class FlexibleLogin {
 
-    private static FlexibleLogin instance;
+	private static FlexibleLogin instance;
 
-    public static FlexibleLogin getInstance() {
-        return instance;
-    }
+	public static FlexibleLogin getInstance() {
+		return instance;
+	}
 
-    private final PluginContainer pluginContainer;
-    private final Logger logger;
-    private final Game game;
+	private final PluginContainer pluginContainer;
+	private final Logger logger;
+	private final Game game;
 
-    @Inject
-    @DefaultConfig(sharedRoot = false)
-    //We will place more than one config there (i.e. H2/SQLite database)
-    private File defaultConfigFile;
+	@Inject
+	@DefaultConfig(sharedRoot = false)
+	// We will place more than one config there (i.e. H2/SQLite database)
+	private File defaultConfigFile;
 
-    @Inject
-    @DefaultConfig(sharedRoot = false)
-    private ConfigurationLoader<CommentedConfigurationNode> configManager;
+	@Inject
+	@DefaultConfig(sharedRoot = false)
+	private ConfigurationLoader<CommentedConfigurationNode> configManager;
 
-    private Map<PlayerConnection, Integer> attempts = Maps.newConcurrentMap();
+	private Map<PlayerConnection, Integer> attempts = Maps.newConcurrentMap();
 
-    private Settings configuration;
-    private Database database;
-    private ProtectionManager protectionManager;
+	private Settings configuration;
+	private Database database;
+	private ProtectionManager protectionManager;
 
-    private Hasher hasher;
+	private Hasher hasher;
 
-    @Inject
-    public FlexibleLogin(Logger logger, PluginContainer pluginContainer, Game game) {
-        instance = this;
+	@Inject
+	public FlexibleLogin(Logger logger, PluginContainer pluginContainer, Game game) {
+		instance = this;
 
-        this.logger = logger;
-        this.pluginContainer = pluginContainer;
-        this.game = game;
-    }
+		this.logger = logger;
+		this.pluginContainer = pluginContainer;
+		this.game = game;
+	}
 
-    @Listener //During this state, the plugin gets ready for initialization. Logger and config
-    public void onPreInit(GamePreInitializationEvent preInitEvent) {
-        configuration = new Settings(configManager, defaultConfigFile);
-        configuration.load();
+	@Listener // During this state, the plugin gets ready for initialization.
+				// Logger and config
+	public void onPreInit(GamePreInitializationEvent preInitEvent) {
+		configuration = new Settings(configManager, defaultConfigFile);
+		configuration.load();
 
-        database = new Database();
-        database.createTable();
+		database = new Database();
+		database.createTable();
 
-        protectionManager = new ProtectionManager();
+		protectionManager = new ProtectionManager();
 
-        if (configuration.getConfig().getHashAlgo().equalsIgnoreCase("totp")) {
-            hasher = new TOTP();
-        } else {
-            //use bcrypt as fallback for now
-            hasher = new BcryptHasher();
-        }
-    }
+		if (configuration.getConfig().getHashAlgo().equalsIgnoreCase("totp")) {
+			hasher = new TOTP();
+		} else {
+			// use bcrypt as fallback for now
+			logger.info("BcryptHasher");
+			hasher = new BcryptHasher();
+		}
+	}
 
-    @Listener //Commands register + events
-    public void onInit(GameInitializationEvent initEvent) {
-        //register commands
-        CommandManager commandDispatcher = game.getCommandManager();
+	@Listener // Commands register + events
+	public void onInit(GameInitializationEvent initEvent) {
+		// register commands
+		logger.info("Hm.....");
+		CommandManager commandDispatcher = game.getCommandManager();
 
-        commandDispatcher.register(this, CommandSpec.builder()
-                .executor(new LoginCommand())
-                .arguments(GenericArguments.onlyOne(GenericArguments.string(Text.of("password"))))
-                .build(), "login");
+		commandDispatcher.register(this,
+				CommandSpec.builder().executor(new LoginCommand())
+						.arguments(GenericArguments.onlyOne(GenericArguments.string(Text.of("password")))).build(),
+				"login");
 
-        commandDispatcher.register(this, CommandSpec.builder()
-                .executor(new RegisterCommand())
-                .arguments(GenericArguments
-                        .optional(GenericArguments
-                                .repeated(GenericArguments
-                                        .string(Text.of("password")), 2)))
-                .build(), "register");
+		commandDispatcher.register(this,
+				CommandSpec.builder().executor(new RegisterCommand())
+						.arguments(GenericArguments
+								.optional(GenericArguments.repeated(GenericArguments.string(Text.of("password")), 2)))
+				.build(), "register");
 
-        commandDispatcher.register(this, CommandSpec.builder()
-                .executor(new ChangePasswordCommand())
-                .arguments(GenericArguments
-                        .repeated(GenericArguments
-                                .string(Text.of("password")), 2))
-                .build(), "changepassword", "changepw");
+		commandDispatcher.register(this,
+				CommandSpec.builder().executor(new ChangePasswordCommand())
+						.arguments(GenericArguments.repeated(GenericArguments.string(Text.of("password")), 2)).build(),
+				"changepassword", "changepw");
 
-        commandDispatcher.register(this, CommandSpec.builder()
-                .executor(new LogoutCommand())
-                .build(), "logout");
+		commandDispatcher.register(this, CommandSpec.builder().executor(new LogoutCommand()).build(), "logout");
 
-        commandDispatcher.register(this, CommandSpec.builder()
-                .executor(new UnregisterCommand())
-                .arguments(GenericArguments.onlyOne(GenericArguments.string(Text.of("account"))))
-                .permission(pluginContainer.getName() + ".admin")
-                .build(), "unregister");
+		commandDispatcher.register(this,
+				CommandSpec.builder().executor(new UnregisterCommand())
+						.arguments(GenericArguments.onlyOne(GenericArguments.string(Text.of("account"))))
+						.permission(pluginContainer.getName() + ".admin").build(),
+				"unregister");
 
-        commandDispatcher.register(this, CommandSpec.builder()
-                .executor(new ResetPasswordCommand())
-                .arguments(
-                        GenericArguments.onlyOne(GenericArguments.string(Text.of("account")))
-                        , GenericArguments.string(Text.of("password")))
-                .permission(pluginContainer.getName() + ".admin")
-                .build(), "resetpassword", "resetpw");
+		commandDispatcher.register(this,
+				CommandSpec.builder().executor(new ResetPasswordCommand())
+						.arguments(GenericArguments.onlyOne(GenericArguments.string(Text.of("account"))),
+								GenericArguments.string(Text.of("password")))
+				.permission(pluginContainer.getName() + ".admin").build(), "resetpassword", "resetpw");
 
-        commandDispatcher.register(this, CommandSpec.builder()
-                .executor(new SetEmailCommand())
-                .arguments(GenericArguments.onlyOne(GenericArguments.string(Text.of("email"))))
-                .build(), "setemail", "email");
+		commandDispatcher.register(this,
+				CommandSpec.builder().executor(new SetEmailCommand())
+						.arguments(GenericArguments.onlyOne(GenericArguments.string(Text.of("email")))).build(),
+				"setemail", "email");
 
-        commandDispatcher.register(this, CommandSpec.builder()
-                .executor(new UnregisterCommand())
-                .build(), "forgotpassword", "forgot");
+		commandDispatcher.register(this, CommandSpec.builder().executor(new UnregisterCommand()).build(),
+				"forgotpassword", "forgot");
 
-        //register events
-        game.getEventManager().registerListeners(this, new ConnectionListener());
-        game.getEventManager().registerListeners(this, new PreventListener());
-    }
+		// register events
+		game.getEventManager().registerListeners(this, new ConnectionListener());
+		game.getEventManager().registerListeners(this, new PreventListener());
+	}
 
-    @Listener
-    public void onDisable(GameStoppedServerEvent gameStoppedEvent) {
-        //run this task sync in order let it finish before the process ends
-        database.close();
+	@Listener
+	public void onDisable(GameStoppedServerEvent gameStoppedEvent) {
+		// run this task sync in order let it finish before the process ends
+		database.close();
 
-        game.getServer().getOnlinePlayers().stream().forEach(protectionManager::unprotect);
-    }
+		game.getServer().getOnlinePlayers().stream().forEach(protectionManager::unprotect);
+	}
 
-    public Settings getConfigManager() {
-        return configuration;
-    }
+	public Settings getConfigManager() {
+		return configuration;
+	}
 
-    public PluginContainer getContainer() {
-        return pluginContainer;
-    }
+	public PluginContainer getContainer() {
+		return pluginContainer;
+	}
 
-    public Logger getLogger() {
-        return logger;
-    }
+	public Logger getLogger() {
+		return logger;
+	}
 
-    public Game getGame() {
-        return game;
-    }
+	public Game getGame() {
+		return game;
+	}
 
-    public Database getDatabase() {
-        return database;
-    }
+	public Database getDatabase() {
+		return database;
+	}
 
-    public Map<PlayerConnection, Integer> getAttempts() {
-        return attempts;
-    }
+	public Map<PlayerConnection, Integer> getAttempts() {
+		return attempts;
+	}
 
-    public ProtectionManager getProtectionManager() {
-        return protectionManager;
-    }
+	public ProtectionManager getProtectionManager() {
+		return protectionManager;
+	}
 
-    public Hasher getHasher() {
-        //this is thread-safe because it won't change after config load
-        return hasher;
-    }
+	public Hasher getHasher() {
+		// this is thread-safe because it won't change after config load
+		return hasher;
+	}
 }

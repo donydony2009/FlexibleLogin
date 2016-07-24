@@ -36,7 +36,7 @@ import org.spongepowered.api.event.Listener;
 import org.spongepowered.api.event.block.InteractBlockEvent;
 import org.spongepowered.api.event.command.SendCommandEvent;
 import org.spongepowered.api.event.entity.DamageEntityEvent;
-import org.spongepowered.api.event.entity.MoveEntityEvent;
+import org.spongepowered.api.event.entity.DisplaceEntityEvent;
 import org.spongepowered.api.event.filter.cause.First;
 import org.spongepowered.api.event.item.inventory.ChangeInventoryEvent;
 import org.spongepowered.api.event.item.inventory.DropItemEvent;
@@ -48,7 +48,7 @@ public class PreventListener {
     private final FlexibleLogin plugin = FlexibleLogin.getInstance();
 
     @Listener
-    public void onPlayerMove(MoveEntityEvent playerMoveEvent, @First Player player) {
+    public void onPlayerMove(DisplaceEntityEvent.Move playerMoveEvent, @First Player player) {
         Vector3d oldLocation = playerMoveEvent.getFromTransform().getPosition();
         Vector3d newLocation = playerMoveEvent.getToTransform().getPosition();
         if ((oldLocation.getFloorX() != newLocation.getFloorX()
@@ -56,7 +56,7 @@ public class PreventListener {
             checkLoginStatus(playerMoveEvent, player);
         }
     }
-
+    
     @Listener
     public void onChat(MessageChannelEvent.Chat chatEvent, @First Player player) {
         checkLoginStatus(chatEvent, player);
